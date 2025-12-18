@@ -13,8 +13,8 @@ CST.RADAR_IMAGING = 1;
 % -------------------------------------------------------------------------
 
 radar_type = CST.RADAR_IMAGING;  % Radar type : IMAGING
-repData='C:\Users\chloe\OneDrive\Bureau\IMTA 2A\Commande entreprise\Correction_steer_abf (1)\Correction_steer_abf';
-filtreFic = [{'2025_11_10_21_5_47_FO6_30M_45deg.data'}]; % Select only somes files in the folder
+repData='C:\Users\chloe\Downloads\Correction_steer_abf_bien\Correction_steer_abf'; %Mettre le bon chemin
+filtreFic = [{'2025_11_10_21_5_47_FO6_30M_45deg.data'}]; %Mettre le nom du fichier
 
 
 % Look for the files verifying the selection criteria (filtreFic)
@@ -29,7 +29,7 @@ end
 % FILE PARAMETERS
 % -------------------------------------------------------------------------
 Debut                   = 1;  % Start index
-Nb_Data_Dec             = 24; % Number of bundles to read (from index "debut");
+Nb_Data_Dec             = 17; % Number of bundles to read (from index "debut");
 % Nb_Data_Dec=-1 => will read all bundles
 
 % Display configuration
@@ -400,52 +400,6 @@ else
     end
 end
 
-%% ================================
-%   AFFICHAGE RANGE–DOPPLER LCMV ADAPTATIF
-% ================================
-
-% Rafale à afficher (ex : 15 si brouilleur activé à partir de 15)
-k_rafale_aff = 15;
-ib_tx_aff    = 1;          % faisceau TX à afficher
-
-% Sécurisation
-nbRaf = numel(Analyse);
-k_rafale_aff = min(max(1, k_rafale_aff), nbRaf);
-ib_tx_aff    = min(max(1, ib_tx_aff), paramFO.nb_dir_tx);
-
-% Récupération du RD adaptatif
-if isfield(Analyse(k_rafale_aff), 'sig_DBF_LCMV_adapt_dB')
-    RDtmp = Analyse(k_rafale_aff).sig_DBF_LCMV_adapt_dB;
-
-    if ndims(RDtmp) == 2
-        RD_LCMV = RDtmp;  % cas 1 faisceau
-    else
-        RD_LCMV = RDtmp(:,:,ib_tx_aff); % cas multi-faisceaux
-    end
-else
-    error('Le champ sig_DBF_LCMV_adapt_dB n''existe pas dans Analyse.');
-end
-
-% Axes Range & Doppler
-range_axis = (0:paramFO.ncd-1)*paramFO.DistResol;
-speed_axis = (0:paramFO.nrec_dir-1)*paramFO.Vresol;
-
-% ================== AFFICHAGE =====================
-figure;
-imagesc(speed_axis - paramFO.Vitamb/2, range_axis, fftshift(RD_LCMV, 2));
-axis xy;
-colormap(jet2);
-colorbar;
-
-% Choisis ton échelle selon ton dataset (à ajuster si besoin)
-clim([65 155]);  
-
-xlabel('Speed (m/s)');
-ylabel('Range (m)');
-
-title(sprintf('Range–Doppler LCMV adaptatif\nRafale %d   |   TX %d', ...
-      k_rafale_aff, ib_tx_aff));
-
 
 
 
@@ -524,7 +478,6 @@ theta_jam_deg = theta_peaks;
 theta_jam_deg(i_cible) = [];
 
 theta_jam_deg = theta_jam_deg( abs(theta_jam_deg - theta_cible_deg) > zone_cible );
-
 % ========= Construction du projecteur qui enlève le(s) brouilleur(s) ==========
 if isempty(theta_jam_deg)
     warning('Aucun brouilleur nettement détecté. On ne modifie pas R.');
@@ -728,4 +681,3 @@ else % === CAS MULTI-FAISCEAUX (paramFO.nb_dir_tx > 1) ===
     end
     disp('Affichage figure par figure terminé pour le cas Multi-Faisceaux.');
 end
-
