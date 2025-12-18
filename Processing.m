@@ -172,184 +172,57 @@ if( GoToDataFileBundle(paramFO.fileDataID, Debut) && ((LectureDataSg==false) || 
 
         % Adaptive beamforming (a faire)
         % il faut utiliser les donnees *sig_FFT1_FFT2*
-
-% -------------- FIN ADAPTIVE BEAMFORMING (MVDR corrigé) --------------
-
         
-        % ---------------------------------------------
-        %  Beamforming classique (déjà présent)
-        % ---------------------------------------------
+        % Beamforming
         sig_DBF_FFT1_FFT2 = zeros(paramFO.ncd,paramFO.nrec_dir,paramFO.nb_dir_tx);
 
         for iboucle=1:paramFO.nb_dir_tx
             for jboucle=1:paramFO.ncd
                 for kboucle=1:paramFO.nrec_dir
-                    sig_DBF_FFT1_FFT2(jboucle,kboucle,iboucle) = ...
-                        steeringCalTables2D.S(:,iboucle)' * squeeze(sig_FFT1_FFT2(jboucle,kboucle,:,iboucle));
+                    sig_DBF_FFT1_FFT2(jboucle,kboucle,iboucle) = steeringCalTables2D.S(:,iboucle)'*squeeze(sig_FFT1_FFT2(jboucle,kboucle,:,iboucle));
                 end
             end
         end
+    
+       
 
         % Complex to dB power
-        sig_DBF_FFT1_FFT2_2  = abs(sig_DBF_FFT1_FFT2).^2;
-        sig_DBF_FFT1_FFT2_dB = 20*log10(abs(sig_DBF_FFT1_FFT2) + eps);
-
-        % On stocke le RD classique pour le MAIN
-        Analyse(nbDataDec).sig_DBF_classic_dB = sig_DBF_FFT1_FFT2_dB;
-
-        % ----------------------------------------------------
+        sig_DBF_FFT1_FFT2_2 = abs(sig_DBF_FFT1_FFT2).^2;
+        sig_DBF_FFT1_FFT2_dB = 20*log10(abs(sig_DBF_FFT1_FFT2));
+        
         % calcul du niveau de bruit pour tous les pointages TX
-        % ----------------------------------------------------
-        Analyse(nbDataDec).bruit = squeeze(squeeze( ...
-            mean(mean(sig_DBF_FFT1_FFT2_dB(paramT.bruit.iCDmin:paramT.bruit.iCDmax, ...
-                                           paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax, :), 1), 2)));
+        
+        Analyse(nbDataDec).bruit = squeeze(squeeze(mean(mean(sig_DBF_FFT1_FFT2_dB(paramT.bruit.iCDmin:paramT.bruit.iCDmax,paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax,:),1),2)));
 
-        % ----------------------------------------------------
-        % estimation matrice de covariance (déjà présente)
-        % ----------------------------------------------------
+        % estimation matrice de covariance
         R_covar = zeros(paramFO.nbRX,paramFO.nbRX,paramFO.nb_dir_tx);
 
         for iboucle=1:paramFO.nb_dir_tx
-            data_entrainement = sig_FFT1_FFT2(paramT.bruit.iCDmin:paramT.bruit.iCDmax, ...
-                                              paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax, :, iboucle);
-            vect_entrainement = reshape(data_entrainement, ...
-                                size(data_entrainement,1)*size(data_entrainement,2), ...
-                                size(data_entrainement,3)).';
+            
+            data_entrainement = sig_FFT1_FFT2(paramT.bruit.iCDmin:paramT.bruit.iCDmax,paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax,:,iboucle);
+            vect_entrainement = reshape(data_entrainement,size(data_entrainement,1)*size(data_entrainement,2),size(data_entrainement,3)).';
             R_covar(:,:,iboucle) = (1/size(vect_entrainement,2)) * (vect_entrainement*vect_entrainement');
         end
         Analyse(nbDataDec).R_covar = R_covar;
 
-        % ----------------------------------------------------
-        % calcul SNR reflecteur (classique)
-        % ----------------------------------------------------
+        % calcul SNR reflecteur
         num_cd_cible = visu.num_cd_cible;
         SNR_cible=zeros(paramFO.nb_dir_tx,1);
         for iboucle=1:paramFO.nb_dir_tx
-            SNR_cible(iboucle) = sig_DBF_FFT1_FFT2_dB(num_cd_cible,1,iboucle) - Analyse(nbDataDec).bruit(iboucle);
+        SNR_cible(iboucle) = sig_DBF_FFT1_FFT2_dB(num_cd_cible,1,iboucle) - Analyse(nbDataDec).bruit(iboucle);
         end
         Analyse(nbDataDec).SNR_cible = SNR_cible;
 
-        % calcul du niveau de bruit pour les voies RX (classique)
+        % calcul du niveau de bruit pour les voies RX
         for iboucle=1:paramFO.nb_dir_tx
-            for jboucle=1:paramFO.nbRX
-                Analyse(nbDataDec).bruitRX(iboucle,jboucle) = squeeze(squeeze( ...
-                    mean(mean(sig_FFT1_FFT2_dB(paramT.bruit.iCDmin:paramT.bruit.iCDmax, ...
-                                               paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax, ...
-                                               jboucle,iboucle),1),2)));
-                Analyse(nbDataDec).SNR_cible_RX(iboucle,jboucle) = ...
-                    sig_FFT1_FFT2_dB(num_cd_cible,1,jboucle,iboucle) - Analyse(nbDataDec).bruitRX(iboucle,jboucle);
-            end
+             for jboucle=1:paramFO.nbRX
+                 Analyse(nbDataDec).bruitRX(iboucle,jboucle) = squeeze(squeeze(mean(mean(sig_FFT1_FFT2_dB(paramT.bruit.iCDmin:paramT.bruit.iCDmax,paramT.bruit.iDopplerMin:paramT.bruit.iDopplerMax,jboucle,iboucle),1),2)));
+                 Analyse(nbDataDec).SNR_cible_RX(iboucle,jboucle) = sig_FFT1_FFT2_dB(num_cd_cible,1,jboucle,iboucle) - Analyse(nbDataDec).bruitRX(iboucle,jboucle);
+             end
         end
 
-        % =========================================================
-        %  LCMV ANTIBROUILLAGE ADAPTATIF basé sur MUSIC
-        %  - on NE fixe PAS l'angle du brouilleur
-        %  - on détecte ses DOA avec MUSIC à partir de R_covar
-        % =========================================================
 
-        % Grille d'angles pour MUSIC
-        theta_deg = -90:0.5:90;
-        theta_rad = deg2rad(theta_deg);
-        nTheta    = numel(theta_deg);
 
-        % Geometrie antennaire (déjà chargée au début) : antenne_RX.ANT
-        M = paramFO.nbRX;   % nb d'antennes
-
-        % Pré-calcul des vecteurs de pointage
-        A_steer = zeros(M, nTheta);
-        for it = 1:nTheta
-            A_steer(:, it) = spatialSteeringVector(antenne_RX.ANT, paramFO.lambda, theta_rad(it), 0);
-            A_steer(:, it) = A_steer(:, it) .* antenne_RX.pondS(:);   % même pondération que BF
-        end
-
-        % Allocation du cube LCMV adaptatif
-        sig_DBF_FFT1_FFT2_LCMV = zeros(paramFO.ncd, paramFO.nrec_dir, paramFO.nb_dir_tx);
-
-        % Pour chaque faisceau TX, on construit un w_LCMV adaptatif
-        for ib_tx = 1:paramFO.nb_dir_tx
-
-            % ---- R de ce faisceau ---
-            Rb = squeeze(R_covar(:,:,ib_tx));
-            Rb = (Rb + Rb')/2;
-            dl  = 1e-3 * trace(Rb)/M;
-            Rb_dl = Rb + dl*eye(M);
-
-            % ---- MUSIC pour détecter les DOA forts ----
-            [EVEC, EVAL] = eig(Rb_dl);
-            [lambda, idx] = sort(diag(EVAL), 'descend');
-            EVEC = EVEC(:,idx);
-
-            % on suppose par ex. 2 sources (cible + 1 brouilleur) ; à ajuster
-            n_sources = 2;
-            n_sources = min(max(1,n_sources), M-1);
-            En = EVEC(:, n_sources+1:end);
-
-            Proj = En' * A_steer;                % (M-n_sources) x nTheta
-            denom = sum(abs(Proj).^2,1);
-            denom = max(denom, eps);
-            P_music = 1 ./ denom;
-            P_music_dB = 10*log10(P_music/max(P_music));
-
-            % ---- Recherche des pics MUSIC ----
-            [pk, loc_idx] = findpeaks(P_music_dB, 'MinPeakProminence', 3);  % seuil à ajuster
-            theta_peaks = theta_deg(loc_idx);
-
-            if isempty(theta_peaks)
-                % Pas de pic net détecté : on fait MVDR simple autour de la direction TX
-                th_tx_deg = rad2deg(paramFO.tab_dir_ffc_tx(ib_tx,1));
-                [~, idx_th] = min(abs(theta_deg - th_tx_deg));
-                a_cible = A_steer(:, idx_th);
-                C = a_cible;
-                f = 1;
-            else
-                % ---- Séparation cible / brouilleur(s) ----
-                % on prend comme cible le pic le plus proche de la direction TX
-                th_tx_deg = rad2deg(paramFO.tab_dir_ffc_tx(ib_tx,1));
-                [~, idx_cible] = min(abs(theta_peaks - th_tx_deg));
-                theta_cible_deg = theta_peaks(idx_cible);
-
-                % les autres pics => candidats brouilleurs
-                theta_jam_deg = theta_peaks;
-                theta_jam_deg(idx_cible) = [];
-
-                % zone de garde autour de la cible (±5°)
-                zone_cible = 5;
-                theta_jam_deg = theta_jam_deg( abs(theta_jam_deg - theta_cible_deg) > zone_cible );
-
-                % steering cible (en utilisant directement la table calibrée)
-                a_cible = steeringCalTables2D.S(:, ib_tx);
-
-                if isempty(theta_jam_deg)
-                    % Pas de brouilleur clairement détecté => MVDR
-                    C = a_cible;
-                    f = 1;
-                else
-                    % steering brouilleurs
-                    nJam = numel(theta_jam_deg);
-                    A_jam = zeros(M,nJam);
-                    for jj = 1:nJam
-                        a_tmp = spatialSteeringVector(antenne_RX.ANT, paramFO.lambda, ...
-                                                      deg2rad(theta_jam_deg(jj)), 0);
-                        A_jam(:,jj) = a_tmp .* antenne_RX.pondS(:);
-                    end
-                    % Matrice de contraintes LCMV
-                    C = [a_cible, A_jam];          % M x (1+nJam)
-                    f = [1; zeros(nJam,1)];        % (1+nJam) x 1
-                end
-            end
-
-            % ---- Poids LCMV adaptatif ----
-            w_lcmv = (Rb_dl \ C) / (C' * (Rb_dl \ C)) * f;   % Mx1
-
-            % ---- Application aux données Range–Doppler de ce TX ----
-            X = reshape(sig_FFT1_FFT2(:,:,:,ib_tx), [], M);  % [Npoints x M]
-            y = X * conj(w_lcmv);                            % [Npoints x 1]
-            sig_DBF_FFT1_FFT2_LCMV(:,:,ib_tx) = reshape(y, paramFO.ncd, paramFO.nrec_dir);
-        end
-
-        % Passage en dB et stockage
-        sig_DBF_FFT1_FFT2_LCMV_dB = 20*log10(abs(sig_DBF_FFT1_FFT2_LCMV) + eps);
-        Analyse(nbDataDec).sig_DBF_LCMV_adapt_dB = sig_DBF_FFT1_FFT2_LCMV_dB;
 
         % -------------------------------------------------------------------------
         % -------------------------------------------------------------------------
