@@ -401,154 +401,6 @@ else
 end
 
 
-
-
-%% ============================================================
-%   MUSIC / CAPON APRES SUPPRESSION ADAPTATIVE DES BROUILLEURS
-%   (visualisation d'un spectre nettoyé avec idéalement une seule raie)
-% ============================================================
-
-% Choix de la rafale & du faisceau TX à analyser
-k_rafale = 22;      % à adapter (par ex. après activation du brouilleur)
-ib_tx    = 1;       % FO6 -> 1 faisceau, FO2 -> adapter
-
-% Sécurisation
-nbRaf = numel(Analyse);
-k_rafale = min(max(1,k_rafale), nbRaf);
-ib_tx    = min(max(1,ib_tx),   paramFO.nb_dir_tx);
-
-% Matrice de covariance d'origine pour cette rafale & ce TX
-R = Analyse(k_rafale).R_covar(:,:,ib_tx);
-M = size(R,1);
-
-% Hermitisation + diagonal loading
-R = (R + R')/2;
-dl = 1e-3 * trace(R)/M;
-Rdl = R + dl*eye(M);
-
-% ========= Grille angulaire & vecteurs de pointage ==========
-theta_deg = -90:0.5:90;
-theta_rad = deg2rad(theta_deg);
-nTheta    = numel(theta_deg);
-
-[antenne_RX_loc] = fLoadAntennaRX(CST, radar_type, visu);
-
-A_steer = zeros(M,nTheta);
-for it = 1:nTheta
-    a_tmp = spatialSteeringVector(antenne_RX_loc.ANT, paramFO.lambda, theta_rad(it), 0);
-    A_steer(:,it) = a_tmp .* antenne_RX_loc.pondS(:);
-end
-
-% ========= MUSIC AVANT NETTOYAGE (pour comparaison) ==========
-[EVEC, EVAL] = eig(Rdl);
-[lambda, idx] = sort(diag(EVAL), 'descend');
-EVEC = EVEC(:,idx);
-
-n_sources = 2;                          % cible + 1 brouilleur (à adapter)
-n_sources = min(max(1,n_sources),M-1);
-En = EVEC(:,n_sources+1:end);
-
-Proj = En' * A_steer;                   % (M-n_sources) x nTheta
-denom = sum(abs(Proj).^2,1);
-denom = max(denom,eps);
-P_music_orig = 1 ./ denom;
-P_music_orig_dB = 10*log10(P_music_orig / max(P_music_orig));
-
-% ========= Détection automatique des raies (DOA) ==========
-[pk, loc_idx] = findpeaks(P_music_orig_dB, theta_deg, ...
-                          'SortStr','descend', ...
-                          'MinPeakProminence', 3);   % seuil à ajuster
-
-theta_peaks = loc_idx(:);      % DOA estimées en degrés
-nPeaks      = numel(theta_peaks);
-
-if nPeaks == 0
-    warning('Pas de raie nette détectée par MUSIC pour cette rafale.');
-    return;
-end
-
-% Cible = pic le plus proche de la direction TX théorique
-th_tx_deg = rad2deg(paramFO.tab_dir_ffc_tx(ib_tx,1));
-[~,i_cible] = min(abs(theta_peaks - th_tx_deg));
-theta_cible_deg = theta_peaks(i_cible);
-
-% Brouilleurs = les autres pics, en dehors d'une zone de garde autour de la cible
-zone_cible = 1/4;             % ±5° autour de la cible
-theta_jam_deg = theta_peaks;
-theta_jam_deg(i_cible) = [];
-
-theta_jam_deg = theta_jam_deg( abs(theta_jam_deg - theta_cible_deg) > zone_cible );
-% ========= Construction du projecteur qui enlève le(s) brouilleur(s) ==========
-if isempty(theta_jam_deg)
-    warning('Aucun brouilleur nettement détecté. On ne modifie pas R.');
-    R_clean = Rdl;
-else
-    % Matrice des steering vectors des brouilleurs
-    nJam = numel(theta_jam_deg);
-    A_jam = zeros(M,nJam);
-    for jj = 1:nJam
-        a_j = spatialSteeringVector(antenne_RX_loc.ANT, paramFO.lambda, ...
-                                    deg2rad(theta_jam_deg(jj)), 0);
-        A_jam(:,jj) = a_j .* antenne_RX_loc.pondS(:);
-    end
-
-    % Projecteur sur l'orthogonal du sous-espace brouilleur
-    % P_perp = I - A_jam (A_jam^H A_jam)^(-1) A_jam^H
-    G = A_jam' * A_jam;
-    P_perp = eye(M) - A_jam * (G \ A_jam');
-
-    % Covariance nettoyée
-    R_clean = P_perp * Rdl * P_perp';
-    R_clean = (R_clean + R_clean')/2;
-end
-
-% ========= MUSIC APRES NETTOYAGE ==========
-[EVECc, EVALc] = eig(R_clean);
-[lambda_c, idx_c] = sort(diag(EVALc), 'descend');
-EVECc = EVECc(:,idx_c);
-
-En_c = EVECc(:, n_sources+1:end);
-
-Proj_c = En_c' * A_steer;
-denom_c = sum(abs(Proj_c).^2,1);
-denom_c = max(denom_c,eps);
-P_music_clean = 1 ./ denom_c;
-P_music_clean_dB = 10*log10(P_music_clean / max(P_music_clean));
-
-% (Optionnel) CAPON après nettoyage
-Ri_clean = inv(R_clean);
-den_capon = sum(conj(A_steer) .* (Ri_clean * A_steer), 1);
-den_capon = real(max(den_capon,eps));
-P_capon_clean = 1 ./ den_capon;
-P_capon_clean_dB = 10*log10(P_capon_clean / max(P_capon_clean));
-
-%% ========= AFFICHAGES ==========
-% MUSIC avant / après sur la même figure
-figure;
-plot(theta_deg, P_music_orig_dB, 'b-', 'LineWidth',1.2); hold on;
-plot(theta_deg, P_music_clean_dB, 'r-', 'LineWidth',1.2);
-yline(-3,'k:');
-grid on;
-xlabel('Azimut (deg)');
-ylabel('Spectre (dB, normalisé)');
-title(sprintf('MUSIC avant / après antibrouillage (Rafale %d, TX %d)', ...
-       k_rafale, ib_tx));
-legend('MUSIC original','MUSIC nettoyé','Location','best');
-
-% Marque la DOA de la cible et des brouilleurs estimés
-xline(theta_cible_deg, 'k--', 'LineWidth',1.2);
-for jj = 1:numel(theta_jam_deg)
-    xline(theta_jam_deg(jj), 'm--', 'LineWidth',1.0);
-end
-
-% (Optionnel) CAPON nettoyé seul
-figure;
-plot(theta_deg, P_capon_clean_dB, 'g-', 'LineWidth',1.2); grid on;
-xlabel('Azimut (deg)');
-ylabel('Spectre CAPON (dB, normalisé)');
-title(sprintf('CAPON après antibrouillage (Rafale %d, TX %d)', ...
-       k_rafale, ib_tx));
-
 %% =================== PARTIE LCMV ADAPTATIF (Cas 1 Faisceau ou Multi-Faisceaux) ===================================
 
 % --- Paramètres communs ---
@@ -681,3 +533,151 @@ else % === CAS MULTI-FAISCEAUX (paramFO.nb_dir_tx > 1) ===
     end
     disp('Affichage figure par figure terminé pour le cas Multi-Faisceaux.');
 end
+
+%% ============================================================
+%   MUSIC / CAPON APRES SUPPRESSION ADAPTATIVE DES BROUILLEURS
+%   (visualisation d'un spectre nettoyé avec idéalement une seule raie)
+% ============================================================
+
+% Choix de la rafale & du faisceau TX à analyser
+k_rafale = 22;      % à adapter (par ex. après activation du brouilleur)
+ib_tx    = 1;       % FO6 -> 1 faisceau, FO2 -> adapter
+
+% Sécurisation
+nbRaf = numel(Analyse);
+k_rafale = min(max(1,k_rafale), nbRaf);
+ib_tx    = min(max(1,ib_tx),   paramFO.nb_dir_tx);
+
+% Matrice de covariance d'origine pour cette rafale & ce TX
+R = Analyse(k_rafale).R_covar(:,:,ib_tx);
+M = size(R,1);
+
+% Hermitisation + diagonal loading
+R = (R + R')/2;
+dl = 1e-3 * trace(R)/M;
+Rdl = R + dl*eye(M);
+
+% ========= Grille angulaire & vecteurs de pointage ==========
+theta_deg = -90:0.5:90;
+theta_rad = deg2rad(theta_deg);
+nTheta    = numel(theta_deg);
+
+[antenne_RX_loc] = fLoadAntennaRX(CST, radar_type, visu);
+
+A_steer = zeros(M,nTheta);
+for it = 1:nTheta
+    a_tmp = spatialSteeringVector(antenne_RX_loc.ANT, paramFO.lambda, theta_rad(it), 0);
+    A_steer(:,it) = a_tmp .* antenne_RX_loc.pondS(:);
+end
+
+% ========= MUSIC AVANT NETTOYAGE ==========
+[EVEC, EVAL] = eig(Rdl);
+[lambda, idx] = sort(diag(EVAL), 'descend');
+EVEC = EVEC(:,idx);
+
+n_sources = 2;                          % cible + 1 brouilleur (à adapter)
+n_sources = min(max(1,n_sources),M-1);
+En = EVEC(:,n_sources+1:end);
+
+Proj = En' * A_steer;                   % (M-n_sources) x nTheta
+denom = sum(abs(Proj).^2,1);
+denom = max(denom,eps);
+P_music_orig = 1 ./ denom;
+P_music_orig_dB = 10*log10(P_music_orig / max(P_music_orig));
+
+% ========= Détection automatique des raies (DOA) ==========
+[pk, loc_idx] = findpeaks(P_music_orig_dB, theta_deg, ...
+                          'SortStr','descend', ...
+                          'MinPeakProminence', 3);   % seuil à ajuster
+
+theta_peaks = loc_idx(:);      % DOA estimées en degrés
+nPeaks      = numel(theta_peaks);
+
+if nPeaks == 0
+    warning('Pas de raie nette détectée par MUSIC pour cette rafale.');
+    return;
+end
+
+% Cible = pic le plus proche de la direction TX théorique
+th_tx_deg = rad2deg(paramFO.tab_dir_ffc_tx(ib_tx,1));
+[~,i_cible] = min(abs(theta_peaks - th_tx_deg));
+theta_cible_deg = theta_peaks(i_cible);
+
+% Brouilleurs = les autres pics, en dehors d'une zone de garde autour de la cible
+zone_cible = 1/4;             % ±5° autour de la cible
+theta_jam_deg = theta_peaks;
+theta_jam_deg(i_cible) = [];
+
+theta_jam_deg = theta_jam_deg( abs(theta_jam_deg - theta_cible_deg) > zone_cible );
+% ========= Construction du projecteur qui enlève le(s) brouilleur(s) ==========
+if isempty(theta_jam_deg)
+    warning('Aucun brouilleur nettement détecté. On ne modifie pas R.');
+    R_clean = Rdl;
+else
+    % Matrice des steering vectors des brouilleurs
+    nJam = numel(theta_jam_deg);
+    A_jam = zeros(M,nJam);
+    for jj = 1:nJam
+        a_j = spatialSteeringVector(antenne_RX_loc.ANT, paramFO.lambda, ...
+                                    deg2rad(theta_jam_deg(jj)), 0);
+        A_jam(:,jj) = a_j .* antenne_RX_loc.pondS(:);
+    end
+
+    % Projecteur sur l'orthogonal du sous-espace brouilleur
+    % P_perp = I - A_jam (A_jam^H A_jam)^(-1) A_jam^H
+    G = A_jam' * A_jam;
+    P_perp = eye(M) - A_jam * (G \ A_jam');
+
+    % Covariance nettoyée
+    R_clean = P_perp * Rdl * P_perp';
+    R_clean = (R_clean + R_clean')/2;
+end
+
+% ========= MUSIC APRES NETTOYAGE ==========
+[EVECc, EVALc] = eig(R_clean);
+[lambda_c, idx_c] = sort(diag(EVALc), 'descend');
+EVECc = EVECc(:,idx_c);
+
+En_c = EVECc(:, n_sources+1:end);
+
+Proj_c = En_c' * A_steer;
+denom_c = sum(abs(Proj_c).^2,1);
+denom_c = max(denom_c,eps);
+P_music_clean = 1 ./ denom_c;
+P_music_clean_dB = 10*log10(P_music_clean / max(P_music_clean));
+
+% CAPON après nettoyage
+Ri_clean = inv(R_clean);
+den_capon = sum(conj(A_steer) .* (Ri_clean * A_steer), 1);
+den_capon = real(max(den_capon,eps));
+P_capon_clean = 1 ./ den_capon;
+P_capon_clean_dB = 10*log10(P_capon_clean / max(P_capon_clean));
+
+%% ========= AFFICHAGES ==========
+% MUSIC avant / après sur la même figure
+figure;
+plot(theta_deg, P_music_orig_dB, 'b-', 'LineWidth',1.2); hold on;
+plot(theta_deg, P_music_clean_dB, 'r-', 'LineWidth',1.2);
+yline(-3,'k:');
+grid on;
+xlabel('Azimut (deg)');
+ylabel('Spectre (dB, normalisé)');
+title(sprintf('MUSIC avant / après antibrouillage (Rafale %d, TX %d)', ...
+       k_rafale, ib_tx));
+legend('MUSIC original','MUSIC nettoyé','Location','best');
+
+% Marque la DOA de la cible et des brouilleurs estimés
+xline(theta_cible_deg, 'k--', 'LineWidth',1.2);
+for jj = 1:numel(theta_jam_deg)
+    xline(theta_jam_deg(jj), 'm--', 'LineWidth',1.0);
+end
+
+% CAPON nettoyé seul
+figure;
+plot(theta_deg, P_capon_clean_dB, 'g-', 'LineWidth',1.2); grid on;
+xlabel('Azimut (deg)');
+ylabel('Spectre CAPON (dB, normalisé)');
+title(sprintf('CAPON après antibrouillage (Rafale %d, TX %d)', ...
+       k_rafale, ib_tx));
+
+
